@@ -1,6 +1,5 @@
 #! /usr/bin/env python3
 
-
 """
 TrapMaster - SSH Honeypot
 """
@@ -11,6 +10,7 @@ import threading
 import paramiko
 import logging
 import datetime
+import time
 import os
 from colorama import Fore, Style, init
 
@@ -49,7 +49,6 @@ class SSHHoneypot:
         """Log authentication attempt"""
         timestamp = datetime.datetime.now().isoformat()
         
-        # Console output with colors
         if success:
             print(f"{Fore.GREEN}[SUCCESS]{Style.RESET_ALL} {client_ip} - {username}:{password}")
         else:
@@ -61,8 +60,11 @@ class SSHHoneypot:
     def handle_client(self, client_socket, client_addr):
         """Handle incoming SSH connection"""
         client_ip = client_addr[0]
+        transport = None
         
         try:
+            print(f"{Fore.CYAN}🔗 New connection from {client_ip}{Style.RESET_ALL}")
+            
             # Create SSH transport
             transport = paramiko.Transport(client_socket)
             transport.add_server_key(self.host_key)
@@ -73,17 +75,34 @@ class SSHHoneypot:
             # Start SSH server
             transport.start_server(server=server)
             
-            # Keep connection alive briefly
-            channel = transport.accept(2)
-            if channel:
-                channel.send("Welcome to the server!\r\n")
-                channel.close()
+            # Wait for authentication
+            event = threading.Event()
+            transport.auth_handler.auth_event = event
+            
+            # Wait a bit for authentication attempts
+            time.sleep(2)
+            
+            try:
+                channel = transport.accept(40)
+                if channel:
+                    channel.send(b"Welcome to the server!\r\n")
+                    time.sleep(1)
+                    channel.close()
+            except NameError:
+                pass
                 
+        except paramiko.SSHException as e:
+            self.logger.info(f"SSH Exception from {client_ip}: {str(e)}")
         except Exception as e:
             self.logger.error(f"Error handling client {client_ip}: {str(e)}")
         finally:
             try:
-                transport.close()
+                if transport:
+                    transport.close()
+            except:
+                pass
+            try:
+                client_socket.close()
             except:
                 pass
                 
@@ -132,7 +151,7 @@ class SSHServerInterface(paramiko.ServerInterface):
         
     def check_auth_password(self, username, password):
         """Handle password authentication attempts"""
-        # Log the attempt
+        #print(f"🔧 DEBUG: check_auth_password called! {username}:{password}")
         self.honeypot.log_attempt(self.client_ip, username, password, success=False)
         
         # Always reject but log everything
@@ -140,17 +159,31 @@ class SSHServerInterface(paramiko.ServerInterface):
         
     def check_auth_publickey(self, username, key):
         """Handle public key authentication attempts"""
+        #print(f"🔧 DEBUG: check_auth_publickey called! {username}")
         # Log public key attempts
         key_type = key.get_name()
         self.honeypot.logger.info(f"PUBKEY_ATTEMPT | IP: {self.client_ip} | Username: {username} | Key_type: {key_type}")
         return paramiko.AUTH_FAILED
+
+    def check_auth_none(self, username):
+        """Handle 'none' authentication attempts"""
+        #print(f"🔧 DEBUG: check_auth_none called! {username}")
+        return paramiko.AUTH_PARTIALLY_SUCCESSFUL
         
     def get_allowed_auths(self, username):
         """Return allowed authentication methods"""
+        #print(f"🔧 DEBUG: get_allowed_auths called! Returning: password,publickey")
         return "password,publickey"
+    
+    def check_channel_request(self, kind, chanid):
+        """Handle channel requests"""
+        if kind == 'session':
+            return paramiko.OPEN_SUCCEEDED
+        return paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
 
 
 if __name__ == "__main__":
-    # Create and start honeypot
     honeypot = SSHHoneypot(host='0.0.0.0', port=2222)
     honeypot.start()
+
+    
