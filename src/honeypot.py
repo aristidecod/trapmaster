@@ -12,6 +12,8 @@ import logging
 import datetime
 import time
 import os
+import json
+import requests
 from colorama import Fore, Style, init
 
 # Initialize colorama for colored output
@@ -64,18 +66,69 @@ class SSHHoneypot:
             self.host_key.write_private_key_file(key_file)
             os.chmod(key_file, 0o600)
             print(f"{Fore.CYAN}✓ Generated and saved new SSH host key{Style.RESET_ALL}")
+
+    def get_geolocation(self, ip):
+        """Get geolocation info for an IP address"""
+        if ip in ['127.0.0.1', 'localhost', '::1']:
+            return {'country': 'Local', 'city': 'Localhost', 'region': 'Local'}
+        
+        try:
+            # ip-api.com (free, no API key needed)
+            # Rate limit: 45 requests/minute
+            response = requests.get(
+                f'http://ip-api.com/json/{ip}?fields=status,country,city,regionName,isp,lat,lon,proxy',
+                timeout=5
+            )
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('status') == 'success':
+                    return {
+                        'country': data.get('country', 'Unknown'),
+                        'city': data.get('city', 'Unknown'),
+                        'region': data.get('regionName', 'Unknown'),
+                        'isp': data.get('isp', 'Unknown'),
+                        'lat': data.get('lat', 0),
+                        'lon': data.get('lon', 0),
+                        'proxy': data.get('proxy', False)
+                    }
+                else:
+                    self.logger.warning(f"Geolocation failed for {ip}: {data.get('message', 'Unknown error')}")
+        except requests.RequestException as e:
+            self.logger.error(f"Geolocation network error for {ip}: {e}")
+        except Exception as e:
+            self.logger.error(f"Geolocation error for {ip}: {e}")
+        
+        return {'country': 'Unknown', 'city': 'Unknown', 'region': 'Unknown'}
         
     def log_attempt(self, client_ip, username, password, success=False):
-        """Log authentication attempt"""
+        """Log authentication attempt with geolocation"""
         timestamp = datetime.datetime.now().isoformat()
         
+        # Get geolocation
+        geo_info = self.get_geolocation(client_ip)
+        location = f"{geo_info['city']}, {geo_info['country']}"
+        
+        # Console output
         if success:
-            print(f"{Fore.GREEN}[SUCCESS]{Style.RESET_ALL} {client_ip} - {username}:{password}")
+            print(f"{Fore.GREEN}[SUCCESS]{Style.RESET_ALL} {client_ip} ({location}) - {username}:{password}")
         else:
-            print(f"{Fore.RED}[FAILED]{Style.RESET_ALL} {client_ip} - {username}:{password}")
+            print(f"{Fore.RED}[FAILED]{Style.RESET_ALL} {client_ip} ({location}) - {username}:{password}")
             
-        # File logging
-        self.logger.info(f"AUTH_ATTEMPT | IP: {client_ip} | Username: {username} | Password: {password} | Success: {success}")
+        self.logger.info(f"AUTH_ATTEMPT | IP: {client_ip} | Location: {location} | Country: {geo_info['country']} | ISP: {geo_info.get('isp', 'Unknown')} | Username: {username} | Password: {password} | Success: {success}")
+        
+        json_log = {
+            'timestamp': timestamp,
+            'type': 'auth_attempt',
+            'ip': client_ip,
+            'geolocation': geo_info,
+            'username': username,
+            'password': password,
+            'success': success
+        }
+    
+        # Save JSON logs
+        with open('logs/honeypot_json.log', 'a') as f:
+            f.write(json.dumps(json_log) + '\n')
         
     def handle_client(self, client_socket, client_addr):
         """Handle incoming SSH connection"""
