@@ -42,8 +42,28 @@ class SSHHoneypot:
 
     def setup_ssh_server(self):
         """Setup SSH server configuration"""
-        # Generate or load SSH host key
-        self.host_key = paramiko.RSAKey.generate(2048)
+        # Create keys directory with proper permissions
+        keys_dir = 'keys'
+        os.makedirs(keys_dir, mode=0o700, exist_ok=True)  # Permissions restrictives
+        
+        key_file = os.path.join(keys_dir, 'ssh_host_key')
+        
+        if os.path.exists(key_file):
+            # Load existing key
+            try:
+                self.host_key = paramiko.RSAKey.from_private_key_file(key_file)
+                print(f"{Fore.GREEN}✓ Loaded existing SSH host key{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.YELLOW}⚠ Error loading key, generating new one: {e}{Style.RESET_ALL}")
+                self.host_key = paramiko.RSAKey.generate(2048)
+                self.host_key.write_private_key_file(key_file)
+                os.chmod(key_file, 0o600)
+        else:
+            # Generate new key and save it
+            self.host_key = paramiko.RSAKey.generate(2048)
+            self.host_key.write_private_key_file(key_file)
+            os.chmod(key_file, 0o600)
+            print(f"{Fore.CYAN}✓ Generated and saved new SSH host key{Style.RESET_ALL}")
         
     def log_attempt(self, client_ip, username, password, success=False):
         """Log authentication attempt"""
