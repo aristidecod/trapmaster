@@ -36,7 +36,7 @@ class SSHHoneypot:
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('logs/honeypot.log'),
+                logging.FileHandler('logs/ssh_honeypot.log'),
                 logging.StreamHandler()
             ]
         )
@@ -127,7 +127,7 @@ class SSHHoneypot:
         }
     
         # Save JSON logs
-        with open('logs/honeypot_json.log', 'a') as f:
+        with open('logs/ssh_honeypot_json.log', 'a') as f:
             f.write(json.dumps(json_log) + '\n')
         
     def handle_client(self, client_socket, client_addr):
